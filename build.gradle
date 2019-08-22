@@ -1,0 +1,167 @@
+buildscript {
+    repositories {
+        jcenter() // this applies only to the Gradle 'Shadow' plugin
+    }
+    dependencies {
+        classpath 'com.github.jengelman.gradle.plugins:shadow:5.1.0'
+    }
+}
+
+plugins {
+    id 'scala'
+    id 'application'
+    id 'idea'
+    // shadow plugin to produce fat JARs
+    id 'com.github.johnrengelman.shadow' version '5.1.0'
+}
+
+
+// artifact properties
+group = 'org.skon.flink'
+version = '0.1-SNAPSHOT'
+mainClassName = 'org.skon.flink.ReassignWatermark'
+description = """Flink Reassign Watermark"""
+
+ext {
+    javaVersion = '1.8'
+    flinkVersion = '1.8.1'
+    scalaBinaryVersion = '2.12'
+    //scalaBinaryVersionWithMinor = '2.12.8'
+    slf4jVersion = '1.7.7'
+    log4jVersion = '1.2.17'
+    jarDir = "distribution"
+    getDate = { ->
+        new Date().format('yyyy_MM_dd_HH_mm')
+    }
+}
+
+
+sourceCompatibility = javaVersion
+targetCompatibility = javaVersion
+
+tasks.withType(JavaCompile) {
+	options.encoding = 'UTF-8'
+}
+
+applicationDefaultJvmArgs = ["-Dlog4j.configuration=log4j.properties"]
+
+//task wrapper(type: Wrapper) {
+//    gradleVersion = '5.5.1'
+//}
+
+// declare where to find the dependencies of your project
+repositories {
+    mavenCentral()
+    maven { url "https://repository.apache.org/content/repositories/snapshots/" }
+}
+
+// NOTE: We cannot use "compileOnly" or "shadow" configurations since then we could not run code
+// in the IDE or with "gradle run". We also cannot exclude transitive dependencies from the
+// shadowJar yet (see https://github.com/johnrengelman/shadow/issues/159).
+// -> Explicitly define the // libraries we want to be included in the "flinkShadowJar" configuration!
+configurations {
+    flinkShadowJar // dependencies which go into the shadowJar
+
+    // always exclude these (also from transitive dependencies) since they are provided by Flink
+    flinkShadowJar.exclude group: 'org.apache.flink', module: 'force-shading'
+    flinkShadowJar.exclude group: 'com.google.code.findbugs', module: 'jsr305'
+    flinkShadowJar.exclude group: 'org.slf4j'
+    flinkShadowJar.exclude group: 'log4j'
+}
+
+// declare the dependencies for your production and test code
+dependencies {
+    // --------------------------------------------------------------
+    // Compile-time dependencies that should NOT be part of the
+    // shadow jar and are provided in the lib folder of Flink
+    // --------------------------------------------------------------
+    compile group: "org.apache.flink", name: "flink-scala_${scalaBinaryVersion}", version: "${flinkVersion}"
+    compile group: "org.apache.flink", name: "flink-streaming-scala_${scalaBinaryVersion}", version: "${flinkVersion}"
+
+    // --------------------------------------------------------------
+    // Dependencies that should be part of the shadow jar, e.g.
+    // connectors. These must be in the flinkShadowJar configuration!
+    // --------------------------------------------------------------
+    //flinkShadowJar "org.apache.flink:flink-connector-kafka-0.11_${scalaBinaryVersion}:${flinkVersion}"
+    //flinkShadowJar group: "com.github.scopt", name: "scopt_${scalaBinaryVersion}", version: "4.0.0-RC2"
+    flinkShadowJar group: "com.github.scopt", name: "scopt_${scalaBinaryVersion}", version: "3.7.1"
+
+    compile group:"log4j", name: "log4j", version: "${log4jVersion}"
+    compile group:"org.slf4j", name: "slf4j-log4j12", version: "${slf4jVersion}"
+
+    // Add test dependencies here.
+    // testCompile "junit:junit:4.12"
+}
+
+// make compileOnly dependencies available for tests:
+sourceSets {
+    main.compileClasspath += configurations.flinkShadowJar
+    main.runtimeClasspath += configurations.flinkShadowJar
+
+    test.compileClasspath += configurations.flinkShadowJar
+    test.runtimeClasspath += configurations.flinkShadowJar
+
+    javadoc.classpath += configurations.flinkShadowJar
+}
+
+run.classpath = sourceSets.main.runtimeClasspath
+
+task lazyClean {
+    doLast {
+        fileTree("${buildDir}/libs").files.each { file ->
+            if (!tasks.any { it.outputs.files.contains(file) }) {
+                delete(file)
+            }
+        }
+    }
+}
+
+jar {
+    manifest {
+        attributes 'Built-By': System.getProperty('user.name'),
+                'Build-Jdk': System.getProperty('java.version')
+    }
+
+    finalizedBy lazyClean
+    finalizedBy shadowJar
+}
+
+shadowJar {
+    zip64 true
+    configurations = [project.configurations.flinkShadowJar]
+    archiveFileName = "${rootProject.name}-${version}-all.${extension}"
+}
+
+task copyTestResources(type: Copy) {
+    from "${projectDir}/src/test/resources"
+    into "${buildDir}/classes/test"
+}
+processTestResources.dependsOn copyTestResources
+
+task copyJar(type: Copy) {
+    from shadowJar
+    into "$rootDir/$jarDir/"
+}
+
+task cleanJarDir(type: Delete) {
+    delete fileTree("$rootDir/$jarDir/").matching {
+        include "${rootProject.name}-*.jar"
+    }
+}
+
+build.dependsOn cleanJarDir
+build.dependsOn copyJar
+tasks.findByName("copyJar").mustRunAfter("cleanJarDir")
+
+test {
+    useJUnitPlatform()
+    afterSuite { desc, result ->
+        if (!desc.parent) {
+            println "\nTest result: ${result.resultType}"
+            println "Test summary: ${result.testCount} tests, " +
+                    "${result.successfulTestCount} succeeded, " +
+                    "${result.failedTestCount} failed, " +
+                    "${result.skippedTestCount} skipped"
+        }
+    }
+}
