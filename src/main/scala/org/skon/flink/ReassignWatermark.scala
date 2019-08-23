@@ -15,45 +15,36 @@ object ReassignWatermark {
 
     env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
     env.getConfig.setAutoWatermarkInterval(50L)
-    env.setParallelism(1)
+    env.setParallelism(4)
 
     val stream1 = env
       .addSource(new SourceFunction[(Long, Long)] {
         override def run(ctx: SourceFunction.SourceContext[(Long, Long)]): Unit = {
-          (0 to 750000000).foreach(count => ctx.collect((1L, count)))
+          (0 to 750000000).foreach(count => ctx.collectWithTimestamp((1L, count), count))
         }
         override def cancel(): Unit = {}
-      })
-      .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessTimestampExtractor[(Long, Long)](Time.seconds(0L)) {
-        override def extractTimestamp(element: (Long, Long)): Long = element._2
       })
 
     val stream2 = env
       .addSource(new SourceFunction[(Long, Long)] {
         override def run(ctx: SourceFunction.SourceContext[(Long, Long)]): Unit = {
-          //(0 to 75000000).foreach(count => ctx.collect((2L, count)))
+          //(0 to 750000000).foreach(count => ctx.collectWithTimestamp((1L, count), count))
           while (true) {
             Thread.sleep(1000)
           }
         }
         override def cancel(): Unit = {}
-      })
-      .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessTimestampExtractor[(Long, Long)](Time.seconds(0L)) {
-        override def extractTimestamp(element: (Long, Long)): Long = element._2
       })
 
     val stream3 = env
       .addSource(new SourceFunction[(Long, Long)] {
         override def run(ctx: SourceFunction.SourceContext[(Long, Long)]): Unit = {
-          (0 to 75000000).foreach(count => ctx.collect((3L, count)))
+          //(0 to 750000000).foreach(count => ctx.collectWithTimestamp((1L, count), count))
           while (true) {
             Thread.sleep(1000)
           }
         }
         override def cancel(): Unit = {}
-      })
-      .assignTimestampsAndWatermarks(new BoundedOutOfOrdernessTimestampExtractor[(Long, Long)](Time.seconds(0L)) {
-        override def extractTimestamp(element: (Long, Long)): Long = element._2
       })
 
     val stream = stream1
@@ -64,6 +55,7 @@ object ReassignWatermark {
       .assignTimestampsAndWatermarks(new AssignerWithPeriodicWatermarks[(Long, Long)] {
         var currentTimestamp: Long = Long.MinValue
         override def getCurrentWatermark: Watermark = {
+          Console.println(currentTimestamp)
           new Watermark(currentTimestamp)
         }
         override def extractTimestamp(element: (Long, Long), previousElementTimestamp: Long): Long = {
@@ -71,9 +63,10 @@ object ReassignWatermark {
           currentTimestamp
         }
       })
+      .map(e => (e._1, e._2, e._2, e._2))
       .keyBy(_._1)
       .window(TumblingEventTimeWindows.of(Time.seconds(10L)))
-      .sum(1)
+      .reduce((e1, e2) => (e1._1, e1._2, e2._2, e1._2 + e2._2))
       .print
       //.addSink(new CollectionSink[(Long, Long)])
 

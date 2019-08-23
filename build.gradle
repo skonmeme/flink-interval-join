@@ -8,6 +8,7 @@ buildscript {
 }
 
 plugins {
+    id 'java'
     id 'scala'
     id 'application'
     id 'idea'
@@ -75,6 +76,8 @@ dependencies {
     // Compile-time dependencies that should NOT be part of the
     // shadow jar and are provided in the lib folder of Flink
     // --------------------------------------------------------------
+    compile group: "org.apache.flink", name: "flink-java_${scalaBinaryVersion}", version: "${flinkVersion}"
+    compile group: "org.apache.flink", name: "flink-streaming-java_${scalaBinaryVersion}", version: "${flinkVersion}"
     compile group: "org.apache.flink", name: "flink-scala_${scalaBinaryVersion}", version: "${flinkVersion}"
     compile group: "org.apache.flink", name: "flink-streaming-scala_${scalaBinaryVersion}", version: "${flinkVersion}"
 
